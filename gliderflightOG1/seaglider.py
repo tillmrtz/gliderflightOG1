@@ -113,7 +113,7 @@ def flightvec_ds(
     rho0 = ds.attrs.get("rho0", 1025.0)
 
     umag, thdeg = flightvec(
-        buoyancy,
+        9.82*buoyancy/1000,
         ds["PITCH"].values,
         xl,
         hd_a,
@@ -121,7 +121,7 @@ def flightvec_ds(
         hd_c,
         rho0,
     )
-    ds = ds.assign(umag=(("TIME",), umag), thdeg=(("TIME",), thdeg))
+    ds = ds.assign(umag=(("N_MEASUREMENTS",), umag), thdeg=(("N_MEASUREMENTS",), thdeg))
     return ds
 
 
@@ -143,7 +143,7 @@ def regress_all_vec(
     glider : xarray.Dataset
         Glider dataset containing:
         - Attributes: 'hd_a', 'hd_b', 'vbdbias', 'abs_compress', 'therm_expan', 'hd_c' (floats).
-        - Data variables (dimensioned along 'TIME'): 'PRES', 'TEMP',
+        - Data variables (dimensioned along 'N_MEASUREMENTS'): 'PRES', 'TEMP',
           'PSAL', 'PITCH', 'GLIDER_SPEED', 'TIME', 'VERTICAL_SPEED', 'DIVENUM', 'UPDN'.
     whichone : int
         Selector for which misfit function to minimize (e.g., 10 for Ramsey bin averaging).
@@ -472,13 +472,10 @@ def flightvec(
         Glide angle (degrees).
 
     """
-    # Constants
-    gravity = 9.82  # gravitational acceleration (m/s²)
     # Initial estimate for glide angle (radians):
     # +45° for positive buoyancy, -45° for negative buoyancy
     th = (np.pi / 4) * np.sign(buoy)
-    # Convert buoyancy into a force (Newtons)
-    buoyforce = 0.001 * gravity * buoy
+    buoyforce = buoy
 
     # Estimate dynamic pressure (q) assuming vertical motion
     q = (np.sign(buoy) * buoyforce / (xl * xl * hd_b)) ** (4 / 3)
@@ -518,6 +515,9 @@ def flightvec(
             * np.sin(th[valid])
             / (2 * xl * xl * hd_b * q[valid] ** -0.25)
         ) * (1 + np.sqrt(1 - param[valid]))
+        # Ensure q is non-negative to avoid complex or invalid values in subsequent calculations
+        #q_old = np.real(q_old) 
+        q = np.maximum(q, 1e-10)
 
         # Calculate attack angle alpha
         alpha[valid] = (-hd_a * np.tan(th[valid]) / (2 * hd_c)) * (
@@ -614,8 +614,8 @@ def f_misfit_all(x, whichpar, glider: xr.Dataset, whichone: int, unstdyflag: int
     w_measured = glider["GLIDER_VERT_VELO_DZDT"].values
     divenum = glider["DIVENUM"].values
     updn = glider["UPDN"].values
-    lat = glider["LATITUDE"].values.mean()
-    lon = glider["LONGITUDE"].values.mean()
+    lat = glider["LATITUDE"].mean().values
+    lon = glider["LONGITUDE"].mean().values
 
     # Constants
     vbd_min_cnts = glider.attrs["vbd_min_cnts"]
@@ -628,11 +628,13 @@ def f_misfit_all(x, whichpar, glider: xr.Dataset, whichone: int, unstdyflag: int
     # Recalculate volume and buoyancy
     vol1 = vbd + volmax + (c_vbd - vbd_min_cnts) / vbd_cnts_per_cc
     compr_factor = np.exp(-abs_compress * press + therm_expan * (temp - temp_ref))
-    density_insitu = tools.compute_insitu_density(salin, temp, press, lat, lon)
+    density_insitu = tools.compute_insitu_density(salin, temp, press, lon, lat)
 
     vbdc = vbd - vbdbias
     vol = (vol1 - vbdbias) * compr_factor
-    buoy = 1000 * (-mass + density_insitu * vol * 1e-6)
+     # Constants
+    gravity = 9.82  # gravitational acceleration (m/s²)
+    buoy = gravity * (-mass + density_insitu * vol * 1e-6)
 
     # Identify valid steady gliding conditions
     valid = np.where((vbdc * pitch > 0) & (speed > 0))[0]
@@ -670,7 +672,7 @@ def f_misfit_all(x, whichpar, glider: xr.Dataset, whichone: int, unstdyflag: int
         if "PGRID" in glider:
             pgrid = glider["PGRID"].values
         else:
-            pgrid = np.arange(0, 1000, 10)
+            pgrid = np.arange(0, np.ceil(press.max()), 10)
         wg, wspdg, timeg, divenumg, updng = tools.gridthem(
             w_measured, w_model, time, divenum, updn, press, pgrid
         )
@@ -682,7 +684,7 @@ def f_misfit_all(x, whichpar, glider: xr.Dataset, whichone: int, unstdyflag: int
         if "PGRID" in glider:
             pgrid = glider["PGRID"].values
         else:
-            pgrid = np.arange(0, 1000, 10)
+            pgrid = np.arange(0, np.ceil(press.max()), 10)
         allmin, profdiff = tools.ramsey_offset(w_measured, w_model, updn, press, pgrid)
         PROFDIFF = profdiff
 

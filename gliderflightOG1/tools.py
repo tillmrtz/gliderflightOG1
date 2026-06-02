@@ -85,7 +85,7 @@ def compute_insitu_density(
     return density
 
 
-def calc_w_meas(ds):
+def calc_w_meas(ds, depth_var="DEPTH"):
     """Calculates the vertical velocity of a glider using changes in pressure with time.
 
     Parameters
@@ -110,7 +110,7 @@ def calc_w_meas(ds):
         var in ds.variables for var in ["PRES", "LATITUDE", "LONGITUDE"]
     ):
         ds = utilities.calc_DEPTH_Z(ds)
-    depth = ds.DEPTH_Z.values
+    depth = ds[depth_var].values
 
     # Calculate the centered differences in pressure and time, i.e. instead of using neighboring points,
     # use the points two steps away.  This has a couple of advantages: one being a slight smoothing of the
