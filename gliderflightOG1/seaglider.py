@@ -545,7 +545,7 @@ def flightvec(
 
         # Compute steady-state speed from dynamic pressure
         umag = 100 * np.sqrt(2 * q / rho0)  # output in cm/s
-
+    
     return umag, thdeg
 
 
