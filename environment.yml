@@ -1,10 +1,23 @@
+# create environment with:
+# $  conda env create -f environment.yml
+# After creating the environment, set up for Jupyter with:
+# python -m ipykernel install --user \
+#    --name gliderflightOG1 \
+#    --display-name "🌊 gliderlfightOG1"
 name: gliderflightOG1
 channels:
   - conda-forge
 dependencies:
   - python>=3.9
+  - ipywidgets
   - pip
   - pandoc
+  - cmocean
+
   - pip:
       - -r requirements.txt
       - -r requirements-dev.txt
+      - git+https://github.com/OceanGlidersCommunity/glidertest.git
+      - git+https://github.com/tillmrtz/dissipationIFR.git
+      - git+https://github.com/ocean-uhh/seagliderOG1.git
+  

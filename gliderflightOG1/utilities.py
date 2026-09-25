@@ -318,6 +318,28 @@ def safe_update_attrs(
     return ds
 
 
+def regular_grid(data, res):
+    """
+    Create bin edges for a regular grid such that multiples of `res` fall on
+    bin centers. For example, with res=5 the edges are [-2.5, 2.5, 7.5, ...]
+
+    Parameters
+    ----------
+    data : array-like
+        Input data used to determine the grid range.
+    res : float
+        Grid resolution (bin width).
+
+    Returns
+    -------
+    numpy.ndarray
+        Bin edges for the regular grid.
+    """
+    d_min = np.floor(np.nanmin(data) / res) * res + res / 2
+    d_max = np.ceil(np.nanmax(data) / res) * res - res / 2
+    return np.arange(d_min, d_max + res + 1, res)
+
+
 def construct_2dgrid(x, y, v, xi=1, yi=1, x_bin_center: bool = True, y_bin_center: bool = True, agg: str = 'median'):
 
     """

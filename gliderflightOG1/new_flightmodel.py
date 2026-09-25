@@ -5,7 +5,7 @@ import xarray as xr
 import gsw
 from scipy.optimize import minimize
 
-from gliderflightOG1.utilities import construct_2dgrid
+from gliderflightOG1.utilities import construct_2dgrid, regular_grid
 
 import logging
 
@@ -128,8 +128,9 @@ class SteadyFlightModel:
             
             # Condition: First 5 iterations OR every 10th iteration thereafter (e.g., 10, 20, 30...)
             if current_iter <= 5 or current_iter % 10 == 0:
-                # Format current parameters being optimized into a readable string
-                active_params = ", ".join([f"{name}: {x[i]:.4e}" for i, name in enumerate(param_names) if which_par[i] == 1])
+                # Build a running counter that mirrors the order params were packed into x
+                active_names = [name for i, name in enumerate(param_names) if which_par[i] == 1]
+                active_params = ", ".join([f"{name}: {val:.4e}" for name, val in zip(active_names, x)])
                 logger.info(f"🔄 Iteration {current_iter:03d} | Cost: {cost:.6f} | Params -> [{active_params}]")
             return cost
 
@@ -161,7 +162,7 @@ class SteadyFlightModel:
         vol = self.compute_volume(ds)
 
         updn = xr.where(ds.PROFILE_NUMBER % 2 == 1, -1, 1) # 1 for up, -1 for down
-        dzdt = ds.GLIDER_VERT_VELO_DZDT.values
+        dzdt = ds.W_MEAS.values
 
         F_B = self.compute_buoyancy_force(
             density=rho,
@@ -189,12 +190,13 @@ class SteadyFlightModel:
         idn = np.where(updn < 0)[0]
 
         delta_z = 10
-        delta_pn = ds.PROFILE_NUMBER.max() - ds.PROFILE_NUMBER.min()
+        delta_pn = ds.PROFILE_NUMBER.max()
 
         ### create two grids for up and down profile to 
         ### Maybe a problem if profiles do not start and end at the same depth?
-        climb_grid,_,_ = construct_2dgrid(ds.DEPTH.values[iup], ds.PROFILE_NUMBER.values[iup], w_water[iup], delta_z, delta_pn, agg='mean')
-        dive_grid,_,_ = construct_2dgrid(ds.DEPTH.values[idn], ds.PROFILE_NUMBER.values[idn], w_water[idn], delta_z, delta_pn, agg='mean')
+        z_grid = regular_grid(ds.DEPTH.values, delta_z)
+        climb_grid,_,_ = construct_2dgrid(ds.DEPTH.values[iup], ds.PROFILE_NUMBER.values[iup], w_water[iup], z_grid, delta_pn, agg='mean')
+        dive_grid,_,_ = construct_2dgrid(ds.DEPTH.values[idn], ds.PROFILE_NUMBER.values[idn], w_water[idn], z_grid, delta_pn, agg='mean')
 
         w_climb = climb_grid.flatten()
         w_dive = dive_grid.flatten()
@@ -220,15 +222,17 @@ class SteadyFlightModel:
         # Initial guess for dynamic pressure q based on free fall assumption
         q = (np.abs(F_B) / (p.xl**2 * p.hd_b)) ** (4 / 3)
 
+        # Initialize arrays to store previous values and intermediate calculations
         q_old = np.zeros_like(q)
         alpha = np.zeros_like(q)
         thdeg = np.zeros_like(q)
         param = np.ones_like(q)
 
+        # Define a boolean mask to identify valid indices for the iterative solver
         valid = ((F_B != 0) & (np.sign(F_B) * np.sign(pitch) > 0))
 
         iteration = 0
-
+        # Iterate until convergence or maximum iterations reached
         while (np.any(np.abs((q[valid] - q_old[valid])/ q[valid]) > p.tol) and iteration <= p.max_iter):
 
             q_old = q.copy()
@@ -243,13 +247,14 @@ class SteadyFlightModel:
 
             q = np.maximum(q, 1e-10)
 
-            alpha[valid] = (-p.hd_a * np.tan(th[valid]) / (2 * p.hd_c)) * (1 - np.sqrt(1 - param[valid]))
+            alpha[valid] = (p.hd_a * np.tan(th[valid]) / (2 * p.hd_c)) * (1 - np.sqrt(1 - param[valid]))
             
             if valid.any():
-                thdeg[valid] = (pitch[valid] - alpha[valid])
+                thdeg[valid] = (pitch[valid] + alpha[valid])
             else:
                 thdeg[valid] = np.nan
 
+            # Identify stall conditions where the model is not valid
             stall = ((param_inv <= 1) | (np.sign(F_B) * np.sign(pitch) < 0))
 
             q[stall] = 0.0
