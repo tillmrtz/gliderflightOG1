@@ -113,7 +113,7 @@ def flightvec_ds(
     rho0 = ds.attrs.get("rho0", 1025.0)
 
     umag, thdeg = flightvec(
-        9.82*buoyancy/1000,
+        9.82 * buoyancy / 1000,
         ds["PITCH"].values,
         xl,
         hd_a,
@@ -516,7 +516,7 @@ def flightvec(
             / (2 * xl * xl * hd_b * q[valid] ** -0.25)
         ) * (1 + np.sqrt(1 - param[valid]))
         # Ensure q is non-negative to avoid complex or invalid values in subsequent calculations
-        #q_old = np.real(q_old) 
+        # q_old = np.real(q_old)
         q = np.maximum(q, 1e-10)
 
         # Calculate attack angle alpha
@@ -545,7 +545,7 @@ def flightvec(
 
         # Compute steady-state speed from dynamic pressure
         umag = 100 * np.sqrt(2 * q / rho0)  # output in cm/s
-    
+
     return umag, thdeg
 
 
@@ -632,7 +632,7 @@ def f_misfit_all(x, whichpar, glider: xr.Dataset, whichone: int, unstdyflag: int
 
     vbdc = vbd - vbdbias
     vol = (vol1 - vbdbias) * compr_factor
-     # Constants
+    # Constants
     gravity = 9.82  # gravitational acceleration (m/s²)
     buoy = gravity * (-mass + density_insitu * vol * 1e-6)
 

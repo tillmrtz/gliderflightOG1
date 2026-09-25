@@ -19,17 +19,18 @@ class FlightParameters:
     Configuration parameters that are assumed constant
     over a deployment or dive.
     """
+
     # flight model coefficients
-    hd_a: float = 0.004  # 
+    hd_a: float = 0.004  #
     hd_b: float = 0.01
     hd_c: float = 5.7e-5
     xl: float = 1.8
-    mass: float = 52.0 # kg
-    volmax: float = 51000 # cc
+    mass: float = 52.0  # kg
+    volmax: float = 51000  # cc
 
     # reference density
-    rho0: float = 1027.5 # kg/m^3
-    gravity = 9.81 # m/s^2
+    rho0: float = 1027.5  # kg/m^3
+    gravity = 9.81  # m/s^2
 
     # buoyancy model
     vbd_bias: float = 0.0
@@ -38,15 +39,17 @@ class FlightParameters:
 
     # glider volume model
     temp_ref: float = 15.0
-    therm_exp: float = 7.05e-5           # thermal expansion 7e-5
-    abs_compress: float = 4.1e-6            # compressibility 4.4e-6
+    therm_exp: float = 7.05e-5  # thermal expansion 7e-5
+    abs_compress: float = 4.1e-6  # compressibility 4.4e-6
 
     # solver
     tol: float = 1e-3
     max_iter: int = 15
 
+
 # Global variable to track optimization progress
 _optimization_progress = []
+
 
 class SteadyFlightModel:
     """
@@ -75,11 +78,12 @@ class SteadyFlightModel:
     def __init__(self, params: FlightParameters) -> None:
         self.params = params
 
-
-    def solve_model(self, ds: xr.Dataset, which_par: np.ndarray = np.array([1,1,1,0,0,0])) -> xr.Dataset:
+    def solve_model(
+        self, ds: xr.Dataset, which_par: np.ndarray = np.array([1, 1, 1, 0, 0, 0])
+    ) -> xr.Dataset:
         """
         Complete workflow.
-        Parameters        
+        Parameters
         ----------
         ds: xarray.Dataset
         which_par: np.ndarray
@@ -93,24 +97,26 @@ class SteadyFlightModel:
         logger.info("=" * 60)
 
         p = self.params
-        param_names = ['hd_a', 'hd_b', 'vbd_bias', 'abs_compress', 'therm_exp', 'hd_c']
-        
+        param_names = ["hd_a", "hd_b", "vbd_bias", "abs_compress", "therm_exp", "hd_c"]
+
         logger.info("🔍 Initial Parameter Values:")
         for name in param_names:
             logger.info(f"  {name}: {getattr(p, name)}")
-            
+
         logger.info("\nThe following parameters will be optimized:")
         for i, name in enumerate(param_names):
             if which_par[i] == 1:
                 logger.info(f"  {name}")
 
         # Extract only the initial values where which_par == 1
-        all_initials = np.array([p.hd_a, p.hd_b, p.vbd_bias, p.abs_compress, p.therm_exp, p.hd_c])
+        all_initials = np.array(
+            [p.hd_a, p.hd_b, p.vbd_bias, p.abs_compress, p.therm_exp, p.hd_c]
+        )
         x0_to_optimize = all_initials[which_par == 1]
-
 
         # Local state tracker for iterations
         tracker = {"iteration_count": 0}
+
         # Define the objective function that scipy.optimize.minimize will iteratively call
         def objective(x):
             # 1. Map the optimizer's active array 'x' back to our full parameter set
@@ -119,27 +125,33 @@ class SteadyFlightModel:
                 if which_par[idx] == 1:
                     setattr(self.params, name, x[x_idx])
                     x_idx += 1
-            
+
             # 2. Run the misfit evaluation using the newly assigned parameters
             cost = self.misfit(ds)
             # 3. Track and print specific iterations
             tracker["iteration_count"] += 1
             current_iter = tracker["iteration_count"]
-            
+
             # Condition: First 5 iterations OR every 10th iteration thereafter (e.g., 10, 20, 30...)
             if current_iter <= 5 or current_iter % 10 == 0:
                 # Build a running counter that mirrors the order params were packed into x
-                active_names = [name for i, name in enumerate(param_names) if which_par[i] == 1]
-                active_params = ", ".join([f"{name}: {val:.4e}" for name, val in zip(active_names, x)])
-                logger.info(f"🔄 Iteration {current_iter:03d} | Cost: {cost:.6f} | Params -> [{active_params}]")
+                active_names = [
+                    name for i, name in enumerate(param_names) if which_par[i] == 1
+                ]
+                active_params = ", ".join(
+                    [f"{name}: {val:.4e}" for name, val in zip(active_names, x)]
+                )
+                logger.info(
+                    f"🔄 Iteration {current_iter:03d} | Cost: {cost:.6f} | Params -> [{active_params}]"
+                )
             return cost
 
         # Run optimization
         result = minimize(
             objective,  # Pass the dynamic wrapper function here
             x0=x0_to_optimize,
-            method='Nelder-Mead',
-            options={'maxfev': 250, 'xatol': 0.1, 'fatol': 0.01, 'disp': True}
+            method="Nelder-Mead",
+            options={"maxfev": 250, "xatol": 0.1, "fatol": 0.01, "disp": True},
         )
 
         # Apply final optimal values back to parameters permanently
@@ -154,14 +166,14 @@ class SteadyFlightModel:
         for name in param_names:
             logger.info(f"  {name}: {getattr(self.params, name)}")
         logger.info(f"Final Cost: {result.fun}")
-        
+
         return ds
-    
+
     def misfit(self, ds):
         rho = self.compute_density(ds)
         vol = self.compute_volume(ds)
 
-        updn = xr.where(ds.PROFILE_NUMBER % 2 == 1, -1, 1) # 1 for up, -1 for down
+        updn = xr.where(ds.PROFILE_NUMBER % 2 == 1, -1, 1)  # 1 for up, -1 for down
         dzdt = ds.W_MEAS.values
 
         F_B = self.compute_buoyancy_force(
@@ -172,7 +184,7 @@ class SteadyFlightModel:
         umag, thdeg = self.solve_flight(
             F_B=F_B,
             pitch=ds.PITCH.values,
-            updn = updn,
+            updn=updn,
         )
 
         w_model = umag * np.sin(np.deg2rad(thdeg))
@@ -180,7 +192,6 @@ class SteadyFlightModel:
 
         wrms = self.cost_function(ds, updn, w_water)
         return wrms
-
 
     def cost_function(self, ds, updn, w_water):
         """
@@ -192,11 +203,25 @@ class SteadyFlightModel:
         delta_z = 10
         delta_pn = ds.PROFILE_NUMBER.max()
 
-        ### create two grids for up and down profile to 
+        ### create two grids for up and down profile to
         ### Maybe a problem if profiles do not start and end at the same depth?
         z_grid = regular_grid(ds.DEPTH.values, delta_z)
-        climb_grid,_,_ = construct_2dgrid(ds.DEPTH.values[iup], ds.PROFILE_NUMBER.values[iup], w_water[iup], z_grid, delta_pn, agg='mean')
-        dive_grid,_,_ = construct_2dgrid(ds.DEPTH.values[idn], ds.PROFILE_NUMBER.values[idn], w_water[idn], z_grid, delta_pn, agg='mean')
+        climb_grid, _, _ = construct_2dgrid(
+            ds.DEPTH.values[iup],
+            ds.PROFILE_NUMBER.values[iup],
+            w_water[iup],
+            z_grid,
+            delta_pn,
+            agg="mean",
+        )
+        dive_grid, _, _ = construct_2dgrid(
+            ds.DEPTH.values[idn],
+            ds.PROFILE_NUMBER.values[idn],
+            w_water[idn],
+            z_grid,
+            delta_pn,
+            agg="mean",
+        )
 
         w_climb = climb_grid.flatten()
         w_dive = dive_grid.flatten()
@@ -204,7 +229,6 @@ class SteadyFlightModel:
         wrms = np.nanmean(w_climb**2 + w_dive**2)
 
         return wrms
-    
 
     def solve_flight(
         self,
@@ -229,33 +253,47 @@ class SteadyFlightModel:
         param = np.ones_like(q)
 
         # Define a boolean mask to identify valid indices for the iterative solver
-        valid = ((F_B != 0) & (np.sign(F_B) * np.sign(pitch) > 0))
+        valid = (F_B != 0) & (np.sign(F_B) * np.sign(pitch) > 0)
 
         iteration = 0
         # Iterate until convergence or maximum iterations reached
-        while (np.any(np.abs((q[valid] - q_old[valid])/ q[valid]) > p.tol) and iteration <= p.max_iter):
+        while (
+            np.any(np.abs((q[valid] - q_old[valid]) / q[valid]) > p.tol)
+            and iteration <= p.max_iter
+        ):
 
             q_old = q.copy()
 
-            param_inv = (p.hd_a**2 * np.tan(th)**2 * q**0.25 / (4 * p.hd_b * p.hd_c))
+            param_inv = p.hd_a**2 * np.tan(th) ** 2 * q**0.25 / (4 * p.hd_b * p.hd_c)
 
-            valid = ((param_inv > 1) & (np.sign(F_B) * np.sign(pitch) > 0))
+            valid = (param_inv > 1) & (np.sign(F_B) * np.sign(pitch) > 0)
 
-            param[valid] = (4 * p.hd_b * p.hd_c / ( p.hd_a**2 * np.tan(th[valid])**2 * q[valid]**0.25 ))
+            param[valid] = (
+                4
+                * p.hd_b
+                * p.hd_c
+                / (p.hd_a**2 * np.tan(th[valid]) ** 2 * q[valid] ** 0.25)
+            )
 
-            q[valid] = (F_B[valid] * np.sin(th[valid]) / (2 * p.xl**2 * p.hd_b * q[valid]**(-0.25))) * (1 + np.sqrt(1 - param[valid]))
+            q[valid] = (
+                F_B[valid]
+                * np.sin(th[valid])
+                / (2 * p.xl**2 * p.hd_b * q[valid] ** (-0.25))
+            ) * (1 + np.sqrt(1 - param[valid]))
 
             q = np.maximum(q, 1e-10)
 
-            alpha[valid] = (p.hd_a * np.tan(th[valid]) / (2 * p.hd_c)) * (1 - np.sqrt(1 - param[valid]))
-            
+            alpha[valid] = (p.hd_a * np.tan(th[valid]) / (2 * p.hd_c)) * (
+                1 - np.sqrt(1 - param[valid])
+            )
+
             if valid.any():
-                thdeg[valid] = (pitch[valid] + alpha[valid])
+                thdeg[valid] = pitch[valid] + alpha[valid]
             else:
                 thdeg[valid] = np.nan
 
             # Identify stall conditions where the model is not valid
-            stall = ((param_inv <= 1) | (np.sign(F_B) * np.sign(pitch) < 0))
+            stall = (param_inv <= 1) | (np.sign(F_B) * np.sign(pitch) < 0)
 
             q[stall] = 0.0
             thdeg[stall] = 0.0
@@ -264,10 +302,9 @@ class SteadyFlightModel:
 
             iteration += 1
 
-            umag = (100 * np.sqrt(2 * q / p.rho0))
+            umag = 100 * np.sqrt(2 * q / p.rho0)
 
         return umag, thdeg
-    
 
     def compute_flight_speed(self, ds):
         """Compute flight speed from density, volume, and other parameters.
@@ -284,7 +321,7 @@ class SteadyFlightModel:
         rho = self.compute_density(ds)
         vol = self.compute_volume(ds)
 
-        updn = xr.where(ds.PROFILE_NUMBER % 2 == 1, -1, 1) # 1 for up, -1 for down
+        updn = xr.where(ds.PROFILE_NUMBER % 2 == 1, -1, 1)  # 1 for up, -1 for down
 
         F_B = self.compute_buoyancy_force(
             density=rho,
@@ -294,11 +331,10 @@ class SteadyFlightModel:
         umag, theta = self.solve_flight(
             F_B=F_B,
             pitch=ds.PITCH.values,
-            updn = updn,
+            updn=updn,
         )
 
         return umag, theta
-    
 
     def compute_density(self, ds):
         """Compute in-situ density from salinity, temperature, and pressure using GSW.
@@ -328,8 +364,7 @@ class SteadyFlightModel:
         density = gsw.rho(SA, CT, press)
 
         return density
-    
-    
+
     def compute_volume(self, ds):
         """Compute glider volume from VBD and other parameters.
 
@@ -343,35 +378,36 @@ class SteadyFlightModel:
             Glider volume (cc).
         """
         vbd = ds.VBD.values
-        c_vbd = ds.C_VBD.values 
+        c_vbd = ds.C_VBD.values
         press = ds.PRES.values
         temp = ds.TEMP.values
         p = self.params
-        
-        vol1 = vbd + p.volmax + (c_vbd - p.vbd_min_cnts) / p.vbd_cnts_per_cc
-        compr_factor = np.exp(-p.abs_compress * press + p.therm_exp * (temp - p.temp_ref))
 
-        #vbdc = vbd - p.vbd_bias
+        vol1 = vbd + p.volmax + (c_vbd - p.vbd_min_cnts) / p.vbd_cnts_per_cc
+        compr_factor = np.exp(
+            -p.abs_compress * press + p.therm_exp * (temp - p.temp_ref)
+        )
+
+        # vbdc = vbd - p.vbd_bias
         vol = (vol1 - p.vbd_bias) * compr_factor
         return vol
-    
 
     def compute_buoyancy_force(
         self,
         density: np.ndarray,
         vol: np.ndarray,
-        ) -> np.ndarray:
+    ) -> np.ndarray:
         """
         Compute buoyancy force B from density, volume, and other parameters.
         """
 
         p = self.params
-        cc_to_m3 = 1e-6 # conversion factor from cc to m³
+        cc_to_m3 = 1e-6  # conversion factor from cc to m³
 
-        F_B = p.gravity * (- p.mass + density * vol * cc_to_m3)
+        F_B = p.gravity * (-p.mass + density * vol * cc_to_m3)
 
         return F_B
-    
+
     def compute_lift_force(
         self,
         q: np.ndarray,
@@ -386,7 +422,7 @@ class SteadyFlightModel:
         F_L = q * p.xl**2 * p.hd_a * np.sin(alpha)
 
         return F_L
-    
+
     def compute_drag_force(
         self,
         q: np.ndarray,
@@ -398,10 +434,9 @@ class SteadyFlightModel:
 
         p = self.params
 
-        F_D = q * p.xl ** 2 * (p.hd_b * q ** -0.25 + p.hd_c * alpha ** 2)
+        F_D = q * p.xl**2 * (p.hd_b * q**-0.25 + p.hd_c * alpha**2)
 
         return F_D
-    
 
     def compute_alpha(
         self,
@@ -416,7 +451,10 @@ class SteadyFlightModel:
 
         p = self.params
 
-        alpha = updn * (p.hd_b * q ** -0.25 + p.hd_c * alpha ** 2) / (p.hd_a * np.tan(np.deg2rad(pitch - alpha)))
+        alpha = (
+            updn
+            * (p.hd_b * q**-0.25 + p.hd_c * alpha**2)
+            / (p.hd_a * np.tan(np.deg2rad(pitch - alpha)))
+        )
 
         return alpha
-        

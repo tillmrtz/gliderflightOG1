@@ -101,7 +101,7 @@ def calc_w_meas(ds, depth_var="DEPTH"):
     Notes
     -----
     Original Author: Eleanor Frajka-Williams
-    
+
     Seaglider/basestation3.Utils.ctr_1st_diff() code
     dydx = np.array(np.zeros(len(y)), float)
     end = len(x) - 1

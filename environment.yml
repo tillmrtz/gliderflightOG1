@@ -20,4 +20,4 @@ dependencies:
       - git+https://github.com/OceanGlidersCommunity/glidertest.git
       - git+https://github.com/tillmrtz/dissipationIFR.git
       - git+https://github.com/ocean-uhh/seagliderOG1.git
-  
+
