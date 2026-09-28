@@ -152,6 +152,53 @@ def calc_w_meas(ds, depth_var="DEPTH"):
 
     return ds
 
+# The following function should be seen as a general utility function for computing time derivatives of any variable with respect to time. 
+# It uses a central difference method over ±n samples, and it can handle cases where the time intervals are too large by setting those derivatives to NaN.
+
+def time_derivative(
+    time: np.ndarray,
+    values: np.ndarray,
+    n: int = 1,
+    max_dt: float | None = 500,
+) -> np.ndarray:
+    """
+    Compute the time derivative using a central difference over ±n samples.
+
+    Parameters
+    ----------
+    time : np.ndarray
+        Array of times (datetime64).
+    values : np.ndarray
+        Array of values to differentiate.
+    n : int, default=1
+        Number of samples on each side for the central difference.
+    max_dt : float or None, default=500
+        Maximum allowed time interval (s). Larger intervals are set to NaN.
+        Set to None to disable.
+
+    Returns
+    -------
+    derivative : np.ndarray
+        Time derivative with NaN padding at the ends.
+    """
+    if n < 1:
+        raise ValueError("n must be >= 1")
+
+    derivative = np.full(values.shape, np.nan, dtype=float)
+
+    dv = values[n:] - values[:-n]
+    dt = (time[n:] - time[:-n]) / np.timedelta64(1, "s")
+
+    dt = dt.astype(float)
+    invalid = dt == 0
+    if max_dt is not None:
+        invalid |= dt > max_dt
+    dt[invalid] = np.nan
+
+    derivative[:-n] = dv / dt
+
+    return derivative
+
 
 def gridthem(w_measured, w_model, time, divenum, updn, press, pgrid):
     """Bin average vertical speeds into pressure bins.

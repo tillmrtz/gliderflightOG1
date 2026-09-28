@@ -427,3 +427,217 @@ def construct_2dgrid(
         yi = yi[:-1]
     YI, XI = np.meshgrid(yi, xi)
     return grid, XI, YI
+
+
+def interpolate_over_nans(ds, var_name, method="linear"):
+    """
+    Interpolates over NaN values in a specified variable of an xarray Dataset along the 'N_MEASUREMENTS' dimension.
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        The input dataset containing the variable to interpolate.
+    var_name : str
+        The name of the variable in the dataset to interpolate.
+    method : str, optional
+        The interpolation method to use (default is 'linear'). Other methods supported by xarray can be used.
+
+    Returns
+    -------
+    xarray.Dataset
+        A new dataset with the specified variable interpolated over NaN values.
+    """
+    ds = ds.copy()  # avoid modifying original dataset
+    var = ds[var_name]
+    ds[var_name] = var.interpolate_na(dim = "N_MEASUREMENTS", method=method)
+    return ds
+
+
+def restore_masked_array(values, mask, fill_value=np.nan):
+    """
+    Restore an array to its original length using a boolean mask.
+
+    Parameters
+    ----------
+    values : np.ndarray
+        Values corresponding to mask == True.
+    mask : np.ndarray
+        Boolean mask of the original array.
+    fill_value : float, default=np.nan
+        Value to insert where mask == False.
+
+    Returns
+    -------
+    full_array : np.ndarray
+        Array of the same length as mask.
+    """
+    full_array = np.full(mask.shape, fill_value, dtype=float)
+    full_array[mask] = values
+    return full_array
+
+
+def print_profile_diffs(ds, vars_to_print=("PITCH", "TEMP"), n=20, position="beginning", profiles = None):
+    """
+    Print timestamps, time differences, and selected variables for each profile.
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+    vars_to_print : list/tuple of str
+        Variables to print (e.g., ["PITCH", "TEMP"])
+    n : int
+        Number of samples per profile
+    position : str
+        "beginning", "end", or "middle" — where to select the n points
+    """
+    if profiles is None:
+        profiles = np.unique(ds.PROFILE_NUMBER.values)
+
+    elif isinstance(profiles, int):
+        profiles = [profiles]
+
+    else:
+        print("Warning: profiles should be an int or list of ints. Using all profiles.")
+        profiles = np.unique(ds.PROFILE_NUMBER.values)
+
+    for profile in profiles:
+        print(f"\nProfile {profile}:")
+
+        # mask for this profile
+        profile_msk = ds.PROFILE_NUMBER.values == profile
+
+        # timestamps → numeric int64 (ns)
+        ts = ds.TIME.values[profile_msk].astype("datetime64[ns]").astype("int64")
+
+        L = len(ts)
+
+        # --- choose region ---
+        if position == "beginning":
+            idx = slice(0, min(n, L))
+
+        elif position == "end":
+            idx = slice(max(0, L - n), L)
+
+        elif position == "middle":
+            if n >= L:
+                idx = slice(0, L)
+            else:
+                mid = L // 2
+                half = n // 2
+                start = max(0, mid - half)
+                end = min(L, start + n)
+                idx = slice(start, end)
+
+        else:
+            raise ValueError("position must be 'beginning', 'end', or 'middle'")
+
+        # selected timestamps
+        ts_sel = ts[idx]
+
+        # compute Δt (ns → s)
+        diff_seconds = np.diff(ts_sel) * 1e-9
+
+        # collect selected variable data (aligned with diff → skip first)
+        var_data = {}
+        for var in vars_to_print:
+            var_values = ds[var].values[profile_msk][idx]
+            var_data[var] = var_values[1:]
+
+        # print header
+        header = f"{'t datetime[ns]':<29} | {'Δt [s]':>10}"
+        for var in vars_to_print:
+            header += f" | {var:>10}"
+        print(header)
+        print("-" * len(header))
+
+        # rows
+        for i, dt in enumerate(diff_seconds):
+            t = ts_sel[i + 1].astype("datetime64[ns]")
+            row = f"{str(t):<29} | {dt:10.4f}"
+
+            for var in vars_to_print:
+                val = var_data[var][i]
+                try:
+                    row += f" | {float(val):10.4f}"
+                except Exception:
+                    row += f" | {str(val):>10}"
+
+            print(row)
+
+
+def add_heights(ds, bathymetry):
+    """
+    Add height above apogee, and height above bottom.
+
+    Height above apogee is calculated independently for each profile:
+
+        height_above_apogee = max(depth in profile) - depth
+
+    Height above bottom is:
+
+        height_above_bottom = -(depth + bathymetry)
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        Dataset containing DEPTH, PROFILE_NUMBER, LONGITUDE and LATITUDE.
+
+    bathymetry : xarray.Dataset
+        GEBCO bathymetry dataset containing 'elevation',
+        'lon', and 'lat'.
+
+    Returns
+    -------
+    xarray.Dataset
+        Dataset with BATHYMETRY, HEIGHT_ABOVE_APOGEE and
+        HEIGHT_ABOVE_BOTTOM added.
+    """
+
+    # --------------------------------------------------
+    # 1. Get bathymetry at each measurement position
+    # --------------------------------------------------
+    elevation = bathymetry["elevation"].sel(
+        lon=ds["LONGITUDE"],
+        lat=ds["LATITUDE"],
+        method="nearest",
+    ).values
+
+    # --------------------------------------------------
+    # 2. Height above apogee
+    # --------------------------------------------------
+    depth = ds["DEPTH"].values
+    profile_n = ds["PROFILE_NUMBER"].values
+
+    height_above_apogee = np.full(
+        depth.shape,
+        np.nan,
+        dtype=float,
+    )
+
+    for profile in np.unique(profile_n):
+        mask = profile_n == profile
+
+        depth_profile = depth[mask]
+
+        if np.all(np.isnan(depth_profile)):
+            continue
+
+        apogee_depth = np.nanmax(depth_profile)
+
+        height_above_apogee[mask] = (
+            apogee_depth - depth_profile
+        )
+
+    ds["HEIGHT_ABOVE_APOGEE"] = (
+        ds["DEPTH"].dims,
+        height_above_apogee,
+    )
+
+    # --------------------------------------------------
+    # 3. Height above bottom
+    # --------------------------------------------------
+    ds["HEIGHT_ABOVE_BOTTOM"] = -(
+        ds["DEPTH"] + elevation
+    )
+
+    return ds
